@@ -1,6 +1,6 @@
 [project]
 name = "esp-upload"
-version = "1.0.0"
+version = "1.0.1"
 description = "Ferramenta para gerar LittleFS e gravar firmware ESP32/ESP32-S3 automaticamente"
 authors = [
     {name = "Gabriel Henrique Pascon",email = "gh.pascon@gmail.com"}
@@ -10,7 +10,9 @@ requires-python = ">=3.11,<3.15"
 dependencies = [
     "pyinstaller (>=6.16.0,<7.0.0)",
     "pyserial (>=3.5,<4.0)",
-    "ruff (>=0.15.5,<0.16.0)"
+    "ruff (>=0.15.5,<0.16.0)",
+    "toml (>=0.10.2,<0.11.0)",
+    "tomli (>=2.4.0,<3.0.0)"
 ]
 
 
