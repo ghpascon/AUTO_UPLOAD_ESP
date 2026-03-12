@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>XPAD_PLUS PREFIX CONFIG</title>
+    <link rel="stylesheet" type="text/css" href="/style.css" />
+  </head>
+
+  <body>
+    <div class="container0">
+      <div class="container1">
+        <div class="container2">
+          <label style="position: relative; top: 20px" class="SMTX"
+            >XPAD_PLUS</label
+          >
+        </div>
+        <div class="container2">
+          <button onclick="window.location.href='/'">HOME</button>
+        </div>
+      </div>
+
+      <div
+        style="display: flex; flex-direction: column; align-items: center"
+        class="container1"
+      >
+        <form action="/save_prefix" method="POST" target="hidden_iframe">
+          <div id="table_div" class="container1">
+            <table id="config_table">
+              <thead>
+                <tr>
+                  <th><h1>PARAMETER</h1></th>
+                  <th><h1>VALUE</h1></th>
+                </tr>
+              </thead>
+
+              <tbody>
+                <tr>
+                  <td>
+                    <label>PREFIX:</label>
+                  </td>
+                  <td>
+                    <input
+                      type="text"
+                      class="placeholder_style"
+                      name="prefix"
+                      id="prefix"
+                    />
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="container1">
+            <button type="submit">SAVE CONFIG</button>
+          </div>
+        </form>
+
+        <div class="container1">
+          <div id="table_div" class="container1">
+            <table class="table_2" id="current_config_table">
+              <thead>
+                <tr>
+                  <th>CURRENT CONFIG</th>
+                  <th>VALUE</th>
+                </tr>
+              </thead>
+              <tbody id="current_config_body">
+                <!-- Dados serão carregados via JavaScript -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <iframe name="hidden_iframe" style="display: none"></iframe>
+      </div>
+    </div>
+
+    <script>
+      // Função para carregar configuração atual
+      function loadCurrentConfig() {
+        fetch("/get_prefix")
+          .then((response) => response.json())
+          .then((data) => {
+            document.getElementById("prefix").value = data.prefix;
+          })
+          .catch((error) => console.error("Error:", error));
+      }
+
+      // Função para atualizar tabela de configuração atual
+      function updateCurrentConfigTable() {
+        fetch("/table_prefix_att")
+          .then((response) => response.json())
+          .then((data) => {
+            const tbody = document.getElementById("current_config_body");
+            tbody.innerHTML = "";
+
+            data.forEach((item) => {
+              const row = tbody.insertRow();
+              const cell1 = row.insertCell(0);
+              const cell2 = row.insertCell(1);
+              cell1.innerHTML = `${item[0]}`;
+              cell2.innerHTML = item[1];
+            });
+          })
+          .catch((error) => console.error("Error:", error));
+      }
+
+      // Carregar dados ao carregar a página
+      document.addEventListener("DOMContentLoaded", function () {
+        loadCurrentConfig();
+        updateCurrentConfigTable();
+      });
+
+      // Atualizar dados a cada 2 segundos
+      setInterval(() => {
+        updateCurrentConfigTable();
+      }, 2000);
+
+      // Recarregar configuração após salvar
+      document.querySelector("form").addEventListener("submit", function (e) {
+        setTimeout(() => {
+          updateCurrentConfigTable();
+        }, 500);
+      });
+    </script>
+  </body>
+</html>

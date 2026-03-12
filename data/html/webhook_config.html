@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>XPAD_PLUS WEBHOOK CONFIG</title>
+    <link rel="stylesheet" type="text/css" href="/style.css" />
+  </head>
+  <body class="eth">
+    <div class="container0">
+      <div class="container1">
+        <div class="container2">
+          <label class="SMTX">XPAD_PLUS</label>
+        </div>
+        <div class="container2">
+          <button onclick="window.location.href='/'">HOME</button>
+        </div>
+      </div>
+
+      <div
+        style="display: flex; flex-direction: column; align-items: center"
+        class="container1"
+      >
+        <form
+          action="/save_webhook_config"
+          method="POST"
+          target="hidden_iframe"
+        >
+          <div id="table_div" class="container1">
+            <table id="config_table">
+              <thead>
+                <tr>
+                  <th><h1>PARAMETER</h1></th>
+                  <th><h1>VALUE</h1></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><label>WEBHOOK:</label></td>
+                  <td>
+                    <select id="webhook_on" name="webhook_on">
+                      <option value="0">OFF</option>
+                      <option value="1">ON</option>
+                    </select>
+                  </td>
+                </tr>
+                <tr>
+                  <td><label>URL:</label></td>
+                  <td>
+                    <input
+                      class="placeholder_style"
+                      type="text"
+                      name="webhook_url"
+                      id="webhook_url"
+                    />
+                  </td>
+                </tr>
+                <tr>
+                  <td><label>DEVICE NAME:</label></td>
+                  <td>
+                    <input
+                      class="placeholder_style"
+                      type="text"
+                      name="device_name"
+                      id="device_name"
+                    />
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="container1">
+            <input class="bt_style" type="submit" value="SET CONFIG" />
+          </div>
+        </form>
+        <iframe name="hidden_iframe" style="display: none"></iframe>
+      </div>
+
+      <div class="container1">
+        <h1>CURRENT CONFIG</h1>
+      </div>
+
+      <div class="container1">
+        <table class="table_2" id="dataTable">
+          <thead>
+            <tr>
+              <th>PARAMETER</th>
+              <th>VALUE</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </body>
+  <script>
+    window.onload = function () {
+      fetch("/get_webhook_config")
+        .then((r) => r.json())
+        .then((data) => {
+          document.getElementById("webhook_on").value = data.webhook_on
+            ? "1"
+            : "0";
+          document.getElementById("webhook_url").value = data.webhook_url;
+          document.getElementById("device_name").value = data.device_name;
+        })
+        .catch((e) => console.error("Error fetching webhook config:", e));
+    };
+
+    function update_elements() {
+      fetch("/table_webhook_att")
+        .then((response) => response.json())
+        .then((data) => {
+          const tbody = document
+            .getElementById("dataTable")
+            .getElementsByTagName("tbody")[0];
+          tbody.innerHTML = "";
+          data.forEach((row) => {
+            let tr = document.createElement("tr");
+            row.forEach((cell) => {
+              let td = document.createElement("td");
+              td.textContent = cell;
+              tr.appendChild(td);
+            });
+            tbody.appendChild(tr);
+          });
+        })
+        .catch((error) => console.error("Error fetching data:", error));
+    }
+    setInterval(update_elements, 1000);
+  </script>
+</html>

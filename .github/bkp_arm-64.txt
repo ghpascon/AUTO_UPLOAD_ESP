@@ -1,0 +1,226 @@
+name: Test Build on Windows and Linux
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Poetry and dependencies
+        run: |
+          pip install poetry
+          poetry lock
+          poetry install
+
+      - name: Run tests
+        run: poetry run pytest
+
+      - name: Build executable
+        run: poetry run python scripts/build_exe.py
+
+      - name: Checkout executables repo
+        uses: actions/checkout@v4
+        with:
+          repository: ghpascon/executables
+          token: ${{ secrets.EXECUTABLES_TOKEN }}
+          path: executables-repo
+          ref: main
+
+      - name: Remove old project folder and copy executables
+        run: |
+          project_name=$(basename $GITHUB_REPOSITORY)
+          build_dir="TEMP/main"
+          dest_dir="executables-repo/linux/$project_name"
+
+          # Remove apenas o projeto antigo
+          rm -rf "$dest_dir"
+          mkdir -p "$dest_dir"
+
+          if [ -d "$build_dir" ]; then
+            rsync -av --exclude=build/ "$build_dir/" "$dest_dir/"
+          else
+            echo "Diretório $build_dir não encontrado, build pode ter falhado."
+            exit 1
+          fi
+
+      - name: Commit and push executables
+        run: |
+          cd executables-repo
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add -A
+          git commit -m "Update Linux executables for $project_name" || echo "No changes to commit"
+          git push
+
+  build-linux-arm64:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU for ARM64
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Prepare output directory
+        run: mkdir -p arm64-artifacts
+
+      - name: Build ARM64 executable in Docker
+        run: |
+          docker run --rm --platform linux/arm64 \
+            -v "$PWD:/workspace" \
+            -w /workspace \
+            arm64v8/python:3.11 bash -c "\
+              pip install poetry && \
+              poetry lock && \
+              poetry install && \
+              poetry run pytest && \
+              poetry run python scripts/build_exe.py && \
+              mkdir -p /workspace/arm64-artifacts && \
+              cp -r TEMP/main/* /workspace/arm64-artifacts/ || true"
+
+      - name: Checkout executables repo
+        uses: actions/checkout@v4
+        with:
+          repository: ghpascon/executables
+          token: ${{ secrets.EXECUTABLES_TOKEN }}
+          path: executables-repo
+          ref: main
+
+      - name: Remove old project folder and copy executables
+        run: |
+          project_name=$(basename $GITHUB_REPOSITORY)
+          dest_dir="executables-repo/linux-arm64/$project_name"
+
+          # Remove apenas o projeto antigo
+          rm -rf "$dest_dir"
+          mkdir -p "$dest_dir"
+
+          if [ -d "arm64-artifacts" ]; then
+            rsync -av --exclude=build/ arm64-artifacts/ "$dest_dir/"
+          else
+            echo "Diretório arm64-artifacts não encontrado, build pode ter falhado."
+            exit 1
+          fi
+
+      - name: Commit and push executables
+        run: |
+          cd executables-repo
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add -A
+          git commit -m "Update Linux ARM64 executables for $project_name" || echo "No changes to commit"
+          git pull --rebase
+          git push
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Poetry and dependencies
+        run: pip install poetry; poetry lock; poetry install
+
+      - name: Run tests
+        run: poetry run pytest
+
+      - name: Build executable
+        run: poetry run python scripts/build_exe.py
+
+      - name: Checkout executables repo
+        uses: actions/checkout@v4
+        with:
+          repository: ghpascon/executables
+          token: ${{ secrets.EXECUTABLES_TOKEN }}
+          path: executables-repo
+          ref: main
+
+      - name: Remove old project folder and copy executables
+        shell: pwsh
+        run: |
+          $projectName = $env:GITHUB_REPOSITORY.Split('/')[1]
+          $destDir = "executables-repo/windows/$projectName"
+
+          # Remove apenas o projeto antigo
+          Remove-Item -Path $destDir -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $destDir
+
+          Copy-Item -Path TEMP\main\* -Destination $destDir\ -Recurse -Force
+
+      - name: Commit and push executables
+        shell: pwsh
+        run: |
+          cd executables-repo
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add -A
+          git commit -m "Update Windows executables for $projectName" || echo "No changes to commit"
+          git push
+
+  tag-executables:
+    runs-on: ubuntu-latest
+    needs: [build-linux, build-linux-arm64, build-windows]
+    steps:
+      - name: Checkout executables repo
+        uses: actions/checkout@v4
+        with:
+          repository: ghpascon/executables
+          token: ${{ secrets.EXECUTABLES_TOKEN }}
+          path: executables-repo
+          ref: main
+
+      - name: Determine tag to use
+        run: |
+          project_name=$(basename $GITHUB_REPOSITORY)
+          cd executables-repo
+          git fetch --tags
+
+          origin_tag=$(git ls-remote --tags https://github.com/$GITHUB_REPOSITORY.git | awk -F/ '{print $3}' | sort -V | tail -n1)
+
+          if [ -n "$origin_tag" ]; then
+            NEW_TAG="${project_name}-${origin_tag}"
+            echo "Using tag from origin repo: $NEW_TAG"
+          else
+            last_tag=$(git tag --list "${project_name}-v*" | sort -V | tail -n1)
+            if [ -z "$last_tag" ]; then
+              NEW_TAG="${project_name}-v1.0.0"
+            else
+              version="${last_tag##*-v}"
+              major=$(echo $version | cut -d. -f1)
+              minor=$(echo $version | cut -d. -f2)
+              patch=$(echo $version | cut -d. -f3)
+              patch=$((patch + 1))
+              NEW_TAG="${project_name}-v${major}.${minor}.${patch}"
+            fi
+            echo "Generated incremental tag: $NEW_TAG"
+          fi
+
+          echo "NEW_TAG=$NEW_TAG" >> $GITHUB_ENV
+
+      - name: Create and push tag
+        run: |
+          cd executables-repo
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git tag -f $NEW_TAG
+          git push origin $NEW_TAG --force
