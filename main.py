@@ -5,6 +5,7 @@ import sys
 import glob
 import time
 import shutil
+import importlib.util
 from dataclasses import dataclass
 from typing import Optional, Dict, Any, List, Tuple
 
@@ -52,6 +53,82 @@ def _build_platform_command(executable_path: str, args: List[str]) -> List[str]:
         wine_cmd = _ensure_wine_available()
         return [wine_cmd, os.path.abspath(executable_path), *args]
     return [os.path.abspath(executable_path), *args]
+
+
+def _resolve_esptool_runner(bundled_exe_path: str) -> List[str]:
+    """Resolve how to execute esptool in a cross-platform way."""
+    bundled_exe_abs = os.path.abspath(bundled_exe_path)
+
+    # On Windows, prefer bundled executable when available.
+    if sys.platform.startswith("win") and os.path.exists(bundled_exe_abs):
+        return [bundled_exe_abs]
+
+    # First choice for Linux/macOS/Windows: esptool command from PATH/venv.
+    esptool_cmd = shutil.which("esptool")
+    if esptool_cmd:
+        return [esptool_cmd]
+
+    # If the Python package is installed, run it as a module.
+    if importlib.util.find_spec("esptool") is not None:
+        return [sys.executable, "-m", "esptool"]
+
+    # Legacy fallback: run bundled .exe through Wine on Linux.
+    if _is_linux() and os.path.exists(bundled_exe_abs):
+        wine_cmd = _ensure_wine_available()
+        return [wine_cmd, bundled_exe_abs]
+
+    raise FileNotFoundError(
+        "Esptool nao encontrado. Instale com 'poetry add esptool' ou forneca esp_depend/esptool.exe."
+    )
+
+
+def _resolve_mklittlefs_runner(bundled_exe_path: str) -> List[str]:
+    """Resolve how to execute mklittlefs in a cross-platform way."""
+    bundled_exe_abs = os.path.abspath(bundled_exe_path)
+
+    # Prefer native command in PATH when available (Linux/macOS/Windows).
+    native_cmd = shutil.which("mklittlefs")
+    if native_cmd:
+        return [native_cmd]
+
+    # Windows fallback: use bundled executable directly.
+    if sys.platform.startswith("win") and os.path.exists(bundled_exe_abs):
+        return [bundled_exe_abs]
+
+    # Linux fallback: run bundled .exe through Wine.
+    if _is_linux() and os.path.exists(bundled_exe_abs):
+        wine_cmd = _ensure_wine_available()
+        return [wine_cmd, bundled_exe_abs]
+
+    raise FileNotFoundError(
+        "mklittlefs nao encontrado. Instale/binario no PATH ou forneca esp_depend/mklittlefs.exe."
+    )
+
+
+def _show_linux_serial_permission_hint(port_name: str):
+    """Print actionable guidance when a Linux serial device is not readable."""
+    print(f"Sem permissao para acessar a porta serial: {port_name}")
+    print("No Linux, normalmente a porta pertence ao grupo 'dialout'.")
+    print("Execute:")
+    print("  sudo usermod -aG dialout $USER")
+    print("Depois, faca logout/login (ou reinicie) e tente novamente.")
+
+
+def _can_access_serial_port(port_name: str) -> bool:
+    """Return True when the current user can read/write the serial port."""
+    if not _is_linux() or not port_name.startswith("/dev/"):
+        return True
+
+    if not os.path.exists(port_name):
+        print(f"Porta serial nao encontrada: {port_name}")
+        return False
+
+    can_access = os.access(port_name, os.R_OK | os.W_OK)
+    if can_access:
+        return True
+
+    _show_linux_serial_permission_hint(port_name)
+    return False
 
 
 def get_frozen_path(relative_path: str) -> str:
@@ -112,13 +189,16 @@ class ESPPaths:
             if not app_files:
                 raise FileNotFoundError("Application binary not found")
 
+            esp_depend_dir = get_frozen_path("esp_depend")
+            selected_esptool = os.path.join(esp_depend_dir, "esptool.exe")
+
             return cls(
                 bootloader=bootloader_files[0],
                 partitions=partitions_files[0],
                 app=app_files[0],
                 littlefs=os.path.join(bin_dir, "littlefs.bin"),
-                esptool=get_frozen_path(os.path.join("esp_depend", "esptool.exe")),
-                boot_app0=get_frozen_path(os.path.join("esp_depend", "boot_app0.bin")),
+                esptool=selected_esptool,
+                boot_app0=os.path.join(esp_depend_dir, "boot_app0.bin"),
             )
         except IndexError as e:
             raise FileNotFoundError(
@@ -155,9 +235,6 @@ def _detect_serial_ports() -> List[Tuple[str, Optional[int]]]:
             # Skip COM1 and COM2
             if port_name not in ["COM1", "COM2"]:
                 if vid is None:
-                    print(
-                        f"Ignoring {port_name}: VID nao identificado ({port.description})"
-                    )
                     continue
 
                 print(
@@ -193,23 +270,24 @@ def _detect_serial_ports() -> List[Tuple[str, Optional[int]]]:
         return []
 
 
-def _put_device_in_download_mode(port_name: str, esptool_path: str) -> bool:
+def _put_device_in_download_mode(port_name: str, esptool_runner: List[str]) -> bool:
     """Put device in download mode for VID=1 ports"""
+    if not _can_access_serial_port(port_name):
+        return False
+
     print(f"Putting device on {port_name} in download mode...")
-    command = _build_platform_command(
-        esptool_path,
-        [
-            "--chip",
-            "auto",
-            "--port",
-            port_name,
-            "--before",
-            "default_reset",
-            "--after",
-            "no_reset",
-            "chip_id",
-        ],
-    )
+    command = [
+        *esptool_runner,
+        "--chip",
+        "auto",
+        "--port",
+        port_name,
+        "--before",
+        "default_reset",
+        "--after",
+        "no_reset",
+        "chip_id",
+    ]
     print(f"Download mode command: {' '.join(command)}")
 
     try:
@@ -222,9 +300,16 @@ def _put_device_in_download_mode(port_name: str, esptool_path: str) -> bool:
 
 
 def _try_upload_with_port(
-    port_name: str, vid: Optional[int], flash_config: FlashConfig, paths: ESPPaths
+    port_name: str,
+    vid: Optional[int],
+    flash_config: FlashConfig,
+    paths: ESPPaths,
+    esptool_runner: List[str],
 ) -> bool:
     """Try upload with a specific port, handling VID=1 special case"""
+    if not _can_access_serial_port(port_name):
+        return False
+
     flash_config.port = port_name
     vid_info = f" (VID: {vid})" if vid is not None else " (VID: Unknown)"
     print(f"\n=== Trying upload with port: {port_name}{vid_info} ===")
@@ -232,12 +317,12 @@ def _try_upload_with_port(
     # Special handling for VID=1 ports
     if vid == 1:
         print("VID=1 detected - putting device in download mode first")
-        if not _put_device_in_download_mode(port_name, paths.esptool):
+        if not _put_device_in_download_mode(port_name, esptool_runner):
             return False
         time.sleep(1)  # Small delay after download mode
 
     # Attempt upload
-    success = _flash_complete_program(flash_config, paths)
+    success = _flash_complete_program(flash_config, paths, esptool_runner)
     if success:
         print(f"✓ Upload successful with port {port_name}")
     else:
@@ -263,6 +348,9 @@ def upload_program_to_esp():
         paths = ESPPaths.from_bin_directory()
         print("[STEP] Binary/tool paths resolved successfully")
 
+        esptool_runner = _resolve_esptool_runner(paths.esptool)
+        print(f"[STEP] Esptool runner selecionado: {' '.join(esptool_runner)}")
+
         # Validate required files exist
         _validate_required_files(paths)
         print("[STEP] Required files validated")
@@ -283,7 +371,7 @@ def upload_program_to_esp():
                     # Try upload with each detected port
                     for port_name, vid in ports_info:
                         success = _try_upload_with_port(
-                            port_name, vid, flash_config, paths
+                            port_name, vid, flash_config, paths, esptool_runner
                         )
                         if success:
                             print(
@@ -302,8 +390,11 @@ def upload_program_to_esp():
         else:
             # Manual port specified - single attempt
             print(f"Using manually specified port: {port}")
+            if not _can_access_serial_port(port):
+                print("Flashing aborted due to serial port permission/access issue.")
+                return False
             flash_config.port = port
-            if not _flash_complete_program(flash_config, paths):
+            if not _flash_complete_program(flash_config, paths, esptool_runner):
                 print("Flashing failed with manual port.")
                 return False
             else:
@@ -322,7 +413,6 @@ def _validate_required_files(paths: ESPPaths):
         (paths.bootloader, "Bootloader binary"),
         (paths.partitions, "Partitions binary"),
         (paths.app, "Application binary"),
-        (paths.esptool, "ESPTool executable"),
         (paths.boot_app0, "boot_app0 binary"),
     ]
 
@@ -336,7 +426,9 @@ def _validate_required_files(paths: ESPPaths):
         print("Continuing without filesystem data...")
 
 
-def _flash_complete_program(config: FlashConfig, paths: ESPPaths) -> bool:
+def _flash_complete_program(
+    config: FlashConfig, paths: ESPPaths, esptool_runner: List[str]
+) -> bool:
     """Flash complete program including filesystem to ESP32"""
     program_parts = [
         (config.boot_location, paths.bootloader),
@@ -352,14 +444,14 @@ def _flash_complete_program(config: FlashConfig, paths: ESPPaths) -> bool:
     else:
         print("Flashing program without filesystem...")
 
-    command = _build_esptool_command(config, paths.esptool, program_parts)
+    command = _build_esptool_command(config, esptool_runner, program_parts)
     print(f"Command: {' '.join(command)}")
 
     return _execute_flash_command(command)
 
 
 def _build_esptool_command(
-    config: FlashConfig, esptool_path: str, program_parts: list[tuple[str, str]]
+    config: FlashConfig, esptool_runner: List[str], program_parts: list[tuple[str, str]]
 ) -> List[str]:
     """Build esptool command with given configuration and program parts"""
     base_args = [
@@ -395,7 +487,7 @@ def _build_esptool_command(
 
     print(f"Debug - Program parts: {valid_parts}")
 
-    return _build_platform_command(esptool_path, [*base_args, *parts_args])
+    return [*esptool_runner, *base_args, *parts_args]
 
 
 def _execute_flash_command(command: List[str]) -> bool:
@@ -419,8 +511,10 @@ def generate_littlefs_bin(input_folder: str, output_folder: str) -> Optional[str
     os.makedirs(output_folder, exist_ok=True)
 
     mklittlefs_exe = get_frozen_path(os.path.join("esp_depend", "mklittlefs.exe"))
-    if not os.path.exists(mklittlefs_exe):
-        print(f"mklittlefs executable not found: {mklittlefs_exe}")
+    try:
+        mklittlefs_runner = _resolve_mklittlefs_runner(mklittlefs_exe)
+    except FileNotFoundError as e:
+        print(str(e))
         return None
 
     # LittleFS parameters
@@ -429,20 +523,18 @@ def generate_littlefs_bin(input_folder: str, output_folder: str) -> Optional[str
     total_size = 1572864  # 1.5MB
     output_bin = os.path.join(output_folder, "littlefs.bin")
 
-    command = _build_platform_command(
-        mklittlefs_exe,
-        [
-            "-c",
-            os.path.abspath(input_folder),
-            "-p",
-            str(page_size),
-            "-b",
-            str(block_size),
-            "-s",
-            str(total_size),
-            os.path.abspath(output_bin),
-        ],
-    )
+    command = [
+        *mklittlefs_runner,
+        "-c",
+        os.path.abspath(input_folder),
+        "-p",
+        str(page_size),
+        "-b",
+        str(block_size),
+        "-s",
+        str(total_size),
+        os.path.abspath(output_bin),
+    ]
 
     try:
         result = subprocess.run(
@@ -488,9 +580,8 @@ def main():
         print(f"Plataforma detectada: {platform_name}")
         print("Etapas planejadas:")
         if _is_linux():
-            print(
-                "1) Detectar/usar Wine para executar .exe (instala wine64 se necessario)"
-            )
+            print("1) Detectar ferramentas nativas (esptool/mklittlefs) no PATH")
+            print("   (usa Wine apenas quando so houver .exe em esp_depend)")
         else:
             print("1) Executar ferramentas nativamente no sistema")
         print("2) Gerar littlefs.bin a partir da pasta data/")
