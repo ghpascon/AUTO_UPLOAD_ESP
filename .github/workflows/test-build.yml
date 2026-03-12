@@ -23,7 +23,7 @@ jobs:
         run: |
           pip install poetry
           poetry lock
-          poetry install
+          poetry install --no-root
 
       - name: Build executable
         run: poetry run python scripts/build_exe.py
@@ -74,7 +74,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install Poetry and dependencies
-        run: pip install poetry; poetry lock; poetry install
+        run: pip install poetry; poetry lock; poetry install --no-root
 
 
       - name: Build executable
