@@ -58,18 +58,26 @@ def _build_platform_command(executable_path: str, args: List[str]) -> List[str]:
 def _resolve_esptool_runner(bundled_exe_path: str) -> List[str]:
     """Resolve how to execute esptool in a cross-platform way."""
     bundled_exe_abs = os.path.abspath(bundled_exe_path)
+    bundled_native_abs = os.path.splitext(bundled_exe_abs)[0]
+    is_frozen = bool(getattr(sys, "frozen", False))
 
     # On Windows, prefer bundled executable when available.
     if sys.platform.startswith("win") and os.path.exists(bundled_exe_abs):
         return [bundled_exe_abs]
+
+    # On Linux/macOS, accept bundled native binary (without .exe) when present.
+    if not sys.platform.startswith("win") and os.path.exists(bundled_native_abs):
+        return [bundled_native_abs]
 
     # First choice for Linux/macOS/Windows: esptool command from PATH/venv.
     esptool_cmd = shutil.which("esptool")
     if esptool_cmd:
         return [esptool_cmd]
 
-    # If the Python package is installed, run it as a module.
-    if importlib.util.find_spec("esptool") is not None:
+    # Script mode only: run Python package as a module.
+    # In frozen mode, sys.executable points to this app binary, so "-m esptool"
+    # would recursively invoke this program instead of Python.
+    if not is_frozen and importlib.util.find_spec("esptool") is not None:
         return [sys.executable, "-m", "esptool"]
 
     # Legacy fallback: run bundled .exe through Wine on Linux.
@@ -291,11 +299,22 @@ def _put_device_in_download_mode(port_name: str, esptool_runner: List[str]) -> b
     print(f"Download mode command: {' '.join(command)}")
 
     try:
-        subprocess.run(command, check=True, capture_output=True)
+        result = subprocess.run(
+            command, check=True, capture_output=True, text=True, timeout=20
+        )
+        if result.stdout:
+            print(result.stdout.strip())
         print("Device successfully put in download mode")
         return True
+    except subprocess.TimeoutExpired:
+        print("Timeout ao colocar dispositivo em download mode (20s)")
+        return False
     except subprocess.CalledProcessError as e:
         print(f"Failed to put device in download mode: {e}")
+        if e.stdout:
+            print(e.stdout)
+        if e.stderr:
+            print(e.stderr)
         return False
 
 
