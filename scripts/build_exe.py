@@ -101,7 +101,6 @@ for folder in EXTRA_FOLDERS:
 opts = [
     ENTRY_SCRIPT,
     f"--name={APP_NAME}",
-    "--onefile",
     f"--distpath={output_dir}",
     f"--workpath={work_dir}",
     "--noconfirm",
