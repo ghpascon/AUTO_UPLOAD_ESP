@@ -1,6 +1,6 @@
 [project]
 name = "esp-upload"
-version = "3.0.5"
+version = "3.0.6"
 description = "Ferramenta para gerar LittleFS e gravar firmware ESP32/ESP32-S3 automaticamente"
 authors = [
     {name = "Gabriel Henrique Pascon",email = "gh.pascon@gmail.com"}
