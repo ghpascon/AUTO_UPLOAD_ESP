@@ -14,7 +14,6 @@ EXE_PATH = "TEMP"  # Base folder to store builds
 ENTRY_SCRIPT = "main.py"  # Main script
 APP_NAME = "main"  # Final executable name
 EXTRA_FOLDERS = [
-    "esp_depend",
 ]  # Extra folders to include in the build
 
 

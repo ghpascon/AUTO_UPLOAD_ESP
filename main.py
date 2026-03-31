@@ -291,10 +291,10 @@ def _put_device_in_download_mode(port_name: str, esptool_runner: List[str]) -> b
         "--port",
         port_name,
         "--before",
-        "default_reset",
+        "default-reset",
         "--after",
-        "no_reset",
-        "chip_id",
+        "no-reset",
+        "chip-id",
     ]
     print(f"Download mode command: {' '.join(command)}")
 

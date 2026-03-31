@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!doctype html>
 <html>
   <head>
     <title>XPAD_PLUS WEBHOOK CONFIG</title>
@@ -11,7 +11,7 @@
           <label class="SMTX">XPAD_PLUS</label>
         </div>
         <div class="container2">
-          <button onclick="window.location.href='/'">HOME</button>
+          <button onclick="window.location.href = '/'">HOME</button>
         </div>
       </div>
 
@@ -53,17 +53,6 @@
                     />
                   </td>
                 </tr>
-                <tr>
-                  <td><label>DEVICE NAME:</label></td>
-                  <td>
-                    <input
-                      class="placeholder_style"
-                      type="text"
-                      name="device_name"
-                      id="device_name"
-                    />
-                  </td>
-                </tr>
               </tbody>
             </table>
           </div>
@@ -100,7 +89,6 @@
             ? "1"
             : "0";
           document.getElementById("webhook_url").value = data.webhook_url;
-          document.getElementById("device_name").value = data.device_name;
         })
         .catch((e) => console.error("Error fetching webhook config:", e));
     };

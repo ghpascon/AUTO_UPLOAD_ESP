@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!doctype html>
 <html>
   <head>
     <title>XPAD_PLUS READER CONFIG</title>
@@ -14,7 +14,7 @@
           >
         </div>
         <div class="container2">
-          <button onclick="window.location.href='/'">HOME</button>
+          <button onclick="window.location.href = '/'">HOME</button>
         </div>
       </div>
 
@@ -37,18 +37,6 @@
               </thead>
 
               <tbody>
-                <tr>
-                  <td>
-                    <label>Simple Send:</label>
-                  </td>
-                  <td>
-                    <select id="simple_send" name="simple_send">
-                      <option value="0">0</option>
-                      <option value="1">1</option>
-                    </select>
-                  </td>
-                </tr>
-
                 <tr>
                   <td>
                     <label>SESSION:</label>
@@ -86,7 +74,7 @@
       </div>
 
       <div class="container1">
-        <button onclick="window.location.href='/reader'">READER</button>
+        <button onclick="window.location.href = '/reader'">READER</button>
       </div>
 
       <div class="container1">
@@ -112,7 +100,6 @@
       fetch("/get_reader_config")
         .then((response) => response.json())
         .then((data) => {
-          document.getElementById("simple_send").value = data.simple_send;
           document.getElementById("session").value = data.session;
           document.getElementById("gpi_stop_delay").value = data.gpi_stop_delay;
         })
